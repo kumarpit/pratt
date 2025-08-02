@@ -2,33 +2,33 @@
 (require parser-tools/lex
          (prefix-in : parser-tools/lex-sre))
 
-(define-empty-tokens tokens/punctuation 
+(define-empty-tokens tokens/punctuation
   (LEFT_PAREN
-    RIGHT_PAREN
-    COMMA
-    EOF))
+   RIGHT_PAREN
+   COMMA
+   EOF))
 
 (define-empty-tokens
-  tokens/operator 
-    (ASSIGN
-    PLUS
-    MINUS
-    ASTERISK
-    SLASH
-    CARET
-    TILDE
-    BANG
-    QUESTION
-    COLON))
+  tokens/operator
+  (ASSIGN
+   PLUS
+   MINUS
+   ASTERISK
+   SLASH
+   CARET
+   TILDE
+   BANG
+   QUESTION
+   COLON))
 
-(define-tokens 
-  tokens/value 
+(define-tokens
+  tokens/value
   (NAME))
 
 
 (define pratt/lexer
   (lexer
-    ;; Punctuation
+   ;; Punctuation
    ["(" (token-LEFT_PAREN)]
    [")" (token-RIGHT_PAREN)]
    ["," (token-COMMA)]
@@ -49,9 +49,9 @@
 
    ;; Matches a letter followed by zero or more letters/numbers.
    [(:: alphabetic (:* (:or alphabetic numeric)))
-   (token-NAME (string->symbol lexeme))]
+    (token-NAME (string->symbol lexeme))]
 
-    ;; Misc
+   ;; Misc
 
    ;; Skip any whitespace
    [(union #\space #\newline #\tab #\return) (pratt/lexer input-port)]
@@ -63,9 +63,9 @@
   (let loop ([token (pratt/lexer in)]
              [result empty])
     (if (equal? token-EOF token)
-      (reverse result)
-      (loop (pratt/lexer in)
-            (cons token result)))))
+        (reverse result)
+        (loop (pratt/lexer in)
+              (cons token result)))))
 
 (call-with-input-string "(Test) * (A + B)" lex-all)
 
