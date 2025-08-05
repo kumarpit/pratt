@@ -65,17 +65,18 @@
 ;; PARSER
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Parser is ([tokens: (Listof Token)] [pos: Natual])
-;; interp: Wrapper around a list of tokens
-(struct Parser (tokens pos) #:mutable)
+;; Cursor is ([tokens: (Listof Token)] [pos: Natual])
+;; interp: Wrapper around a list of tokens with helpers to access/modify
+;; position
+(struct Cursor (tokens pos) #:mutable)
 
-;; Parser -> Token
+;; Cursor -> Token
 ;; interp: Returns the token at the current position in the token list
-(define (peek parser) (list-ref (Parser-tokens parser) (Parser-pos parser)))
+(define (peek cursor) (list-ref (Cursor-tokens cursor) (Cursor-pos cursor)))
 
-;; Parser
-;; EFFECT: Advances the position tracked in the Parser by 1
-(define (consume! parser) (set-Parser-pos! parser (add1 (Parser-pos parser))))
+;; Cursor
+;; EFFECT: Advances the position tracked in the Cursor by 1
+(define (consume! cursor) (set-Cursor-pos! cursor (add1 (Cursor-pos cursor))))
 
 ;; TokenType is Symbol
 
@@ -85,9 +86,10 @@
 (define (token-type t)
   (if (symbol? t) t (token-name t)))
 
-;; TokenInfo is ([lbp : Natural]
-;; [nud (or (Parser -> Integer) #f)]
-;; [led (or (Parser -> Integer) #f)])
+;; TokenInfo is
+;; (struct _ ([lbp : Natural]
+;; [nud (or (Cursor -> Integer) #f)]
+;; [led (or (Cursor -> Integer) #f)]))
 ;; interp: contains the left-binding power (lbp), null-denotation and
 ;; left-denotation handler for a Token
 ;;
@@ -96,33 +98,33 @@
 ;; token->token-info is a hash table mapping TokenType -> TokenInfo
 (define token-type->token-info (make-hash))
 
-;; Parser Natural -> Integer
+;; Cursor Natural -> Integer
 ;; interp: Main Pratt parser driver loop
-(define (parse-expression parser [rbp 0])
-  (let* ([current-token (token-type (peek parser))]
+(define (parse-expression cursor [rbp 0])
+  (let* ([current-token (token-type (peek cursor))]
          [token-info (hash-ref token-type->token-info current-token)]
          [left ((TokenInfo-nud token-info) (begin
-                                             (consume! parser)
-                                             parser))])
+                                             (consume! cursor)
+                                             cursor))])
     (let loop ([left left])
-      (define next-token (peek parser))
+      (define next-token (peek cursor))
       (define next-token-info (hash-ref token-type->token-info next-token))
       (if (and next-token-info (> (TokenInfo-lbp next-token-info) rbp))
           (begin
-            (consume! parser)
-            (loop ((TokenInfo-led next-token-info) parser left)))
+            (consume! cursor)
+            (loop ((TokenInfo-led next-token-info) cursor left)))
           left))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; nud handlers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Parser -> Integer
+;; Cursor -> Integer
 ;; interp: Just unwraps the value from the number token
 (define (nud-number p)
-  (token-value (list-ref (Parser-tokens p) (- (Parser-pos p) 1))))
+  (token-value (list-ref (Cursor-tokens p) (- (Cursor-pos p) 1))))
 
-;; Parser -> Integer
+;; Cursor -> Integer
 ;; interp: if a minus token appears in a prefix position, it should negate
 ;; the following expression
 (define (nud-prefix-minus p)
@@ -132,23 +134,23 @@
 ;; led handlers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Parser -> Integer
+;; Cursor -> Integer
 ;; interp: if * appears in the infix position, it should multiply the
 ;; immediate left and right expressions
 (define (led-mul p left)
-  (let* ([op-type (token-type (list-ref (Parser-tokens p)
-                                        (- (Parser-pos p) 1)))]
+  (let* ([op-type (token-type (list-ref (Cursor-tokens p)
+                                        (- (Cursor-pos p) 1)))]
          [info (hash-ref token-type->token-info op-type)]
          [bp (TokenInfo-lbp info)])
     ;; TODO: Should assert this is indeed a *
     (* left (parse-expression p bp))))
 
-;; Parser -> Integer
+;; Cursor -> Integer
 ;; interp: if + appears in the infix position, it should add the
 ;; immediate left and right expressions
 (define (led-add p left)
-  (let* ([op-type (token-type (list-ref (Parser-tokens p)
-                                        (- (Parser-pos p) 1)))]
+  (let* ([op-type (token-type (list-ref (Cursor-tokens p)
+                                        (- (Cursor-pos p) 1)))]
          [info (hash-ref token-type->token-info op-type)]
          [bp (TokenInfo-lbp info)])
     ;; TODO: Should assert this is indeed a +
@@ -156,7 +158,7 @@
 
 ;; End of led handlers
 
-;; TokenType Natural (or (Parser -> Integer) #f) (or (Parser -> Integer) #f)
+;; TokenType Natural (or (Cursor -> Integer) #f) (or (Cursor -> Integer) #f)
 ;; EFFECT: Adds a token type to token info entry for the given token type
 (define (define-token-info type lbp [nud #f] [led #f])
   (hash-set! token-type->token-info type (TokenInfo lbp nud led)))
@@ -182,4 +184,4 @@
 ;; interp: Entrypoint; Parses (and interprets) the given arithmetic expr
 (define (pratt/parse str)
   (let ([tokens (call-with-input-string str pratt/lex)])
-    (parse-expression (Parser tokens 0))))
+    (parse-expression (Cursor tokens 0))))
