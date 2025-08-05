@@ -149,6 +149,18 @@
 ;; led handlers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define (led/? cursor left)
+  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
+                                        (- (Cursor-pos cursor) 1)))]
+         [info (hash-ref token-type->token-info op-type)]
+         [bp (TokenInfo-lbp info)]
+         [conseq (parse-expression cursor 0)])
+    (if (zero? left) conseq
+        (begin
+          (unless (equal? (token-type (peek cursor)) 'COLON)
+            (error "Malformed ternery"))
+          (consume! cursor)
+          (parse-expression cursor 0)))))
 
 ;; LBP 10
 
@@ -210,8 +222,10 @@
 (define-token-info 'NUMBER 0 nud/number)
 (define-token-info 'LEFT_PAREN 0 nud/lparen)
 (define-token-info 'RIGHT_PAREN 0)
+(define-token-info 'COLON 0)
 (define-token-info 'EOF 0)
 
+(define-token-info 'QUESTION 10 #f led/?)
 (define-token-info 'PLUS 10 #f led/+)
 (define-token-info 'MINUS 10 nud/- led/-)
 (define-token-info 'ASTERISK 20 #f led/*)
