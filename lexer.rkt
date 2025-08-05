@@ -1,15 +1,22 @@
 #lang racket
 (require parser-tools/lex
          (prefix-in : parser-tools/lex-sre))
+(provide all-defined-out)
 
-(define-empty-tokens tokens/punctuation
+;; Token is oneof:
+;; - token/punctuation (Symbol)
+;; - token/operator (Symbol)
+;; - token/value (struct lex/Token ([name : Symbol] [value : Any]))
+
+(define-empty-tokens
+  token/punctuation
   (LEFT_PAREN
    RIGHT_PAREN
    COMMA
    EOF))
 
 (define-empty-tokens
-  tokens/operator
+  token/operator
   (ASSIGN
    PLUS
    MINUS
@@ -22,8 +29,9 @@
    COLON))
 
 (define-tokens
-  tokens/value
-  (NAME))
+  token/value
+  (NAME
+   NUMBER))
 
 
 (define pratt/lexer
@@ -32,7 +40,6 @@
    ["(" (token-LEFT_PAREN)]
    [")" (token-RIGHT_PAREN)]
    ["," (token-COMMA)]
-
    ;; Operators
    ["=" (token-ASSIGN)]
    ["+" (token-PLUS)]
@@ -44,22 +51,16 @@
    ["!" (token-BANG)]
    ["?" (token-QUESTION)]
    [":" (token-COLON)]
-
    ;; Values
-
-   ;; Matches a letter followed by zero or more letters/numbers.
    [(:: alphabetic (:* (:or alphabetic numeric)))
     (token-NAME (string->symbol lexeme))]
-
+   [numeric (token-NUMBER (string->number lexeme))]
    ;; Misc
-
-   ;; Skip any whitespace
    [(union #\space #\newline #\tab #\return) (pratt/lexer input-port)]
-
-   ;; Rule for the end of the input
    [(eof) token-EOF]))
 
-(define (lex-all in)
+;; Port -> (Listof Token)
+(define (lex in)
   (let loop ([token (pratt/lexer in)]
              [result empty])
     (if (equal? token-EOF token)
@@ -67,5 +68,4 @@
         (loop (pratt/lexer in)
               (cons token result)))))
 
-(call-with-input-string "(Test) * (A + B)" lex-all)
-
+;; TODO: TESTS
