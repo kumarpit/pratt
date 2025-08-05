@@ -26,8 +26,6 @@
    ASTERISK
    SLASH
    CARET
-   TILDE
-   BANG
    QUESTION
    COLON))
 
@@ -49,8 +47,6 @@
    ["*" (token-ASTERISK)]
    ["/" (token-SLASH)]
    ["^" (token-CARET)]
-   ["~" (token-TILDE)]
-   ["!" (token-BANG)]
    ["?" (token-QUESTION)]
    [":" (token-COLON)]
    ;; Values
