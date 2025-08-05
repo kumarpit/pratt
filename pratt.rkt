@@ -121,40 +121,84 @@
 
 ;; Cursor -> Integer
 ;; interp: Just unwraps the value from the number token
-(define (nud-number p)
-  (token-value (list-ref (Cursor-tokens p) (- (Cursor-pos p) 1))))
+(define (nud/number cursor)
+  (token-value (list-ref (Cursor-tokens cursor) (- (Cursor-pos cursor) 1))))
 
 ;; Cursor -> Integer
 ;; interp: if a minus token appears in a prefix position, it should negate
 ;; the following expression
-(define (nud-prefix-minus p)
-  (- (parse-expression p 70))) ;; Highest rbp
+(define (nud/- cursor)
+  (- (parse-expression cursor 100))) ;; Highest rbp
+
+;; Cursor -> Integer
+;; interp: if + appears in the infix position, it should add the
+;; immediate left and right expressions
+(define (nud/lparen cursor)
+  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
+                                        (- (Cursor-pos cursor) 1)))]
+         [info (hash-ref token-type->token-info op-type)]
+         [bp (TokenInfo-lbp info)]
+         [result (parse-expression cursor bp)])
+    (begin
+      (unless (equal? (token-type (peek cursor)) 'RIGHT_PAREN)
+        (error "Unmatched ("))
+      (consume! cursor)
+      result)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; led handlers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Cursor -> Integer
-;; interp: if * appears in the infix position, it should multiply the
-;; immediate left and right expressions
-(define (led-mul p left)
-  (let* ([op-type (token-type (list-ref (Cursor-tokens p)
-                                        (- (Cursor-pos p) 1)))]
-         [info (hash-ref token-type->token-info op-type)]
-         [bp (TokenInfo-lbp info)])
-    ;; TODO: Should assert this is indeed a *
-    (* left (parse-expression p bp))))
+
+;; LBP 10
 
 ;; Cursor -> Integer
 ;; interp: if + appears in the infix position, it should add the
 ;; immediate left and right expressions
-(define (led-add p left)
-  (let* ([op-type (token-type (list-ref (Cursor-tokens p)
-                                        (- (Cursor-pos p) 1)))]
+(define (led/+ cursor left)
+  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
+                                        (- (Cursor-pos cursor) 1)))]
          [info (hash-ref token-type->token-info op-type)]
          [bp (TokenInfo-lbp info)])
-    ;; TODO: Should assert this is indeed a +
-    (+ left (parse-expression p bp))))
+    (+ left (parse-expression cursor bp))))
+
+(define (led/- cursor left)
+  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
+                                        (- (Cursor-pos cursor) 1)))]
+         [info (hash-ref token-type->token-info op-type)]
+         [bp (TokenInfo-lbp info)])
+    (- left (parse-expression cursor bp))))
+
+;; LBP 20
+
+;; Cursor -> Integer
+;; interp: if * appears in the infix position, it should multiply the
+;; immediate left and right expressions
+(define (led/* cursor left)
+  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
+                                        (- (Cursor-pos cursor) 1)))]
+         [info (hash-ref token-type->token-info op-type)]
+         [bp (TokenInfo-lbp info)])
+    (* left (parse-expression cursor bp))))
+
+;; Cursor -> Integer
+;; interp: if * appears in the infix position, it should multiply the
+;; immediate left and right expressions
+(define (led// cursor left)
+  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
+                                        (- (Cursor-pos cursor) 1)))]
+         [info (hash-ref token-type->token-info op-type)]
+         [bp (TokenInfo-lbp info)])
+    (/ left (parse-expression cursor bp))))
+
+;; LBP 30
+
+(define (led/^ cursor left)
+  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
+                                        (- (Cursor-pos cursor) 1)))]
+         [info (hash-ref token-type->token-info op-type)]
+         [bp (TokenInfo-lbp info)])
+    (expt left (parse-expression cursor (sub1 bp))))) ;; right-assoc
 
 ;; End of led handlers
 
@@ -163,22 +207,26 @@
 (define (define-token-info type lbp [nud #f] [led #f])
   (hash-set! token-type->token-info type (TokenInfo lbp nud led)))
 
-(define-token-info 'NUMBER 0 nud-number)
+(define-token-info 'NUMBER 0 nud/number)
+(define-token-info 'LEFT_PAREN 0 nud/lparen)
+(define-token-info 'RIGHT_PAREN 0)
 (define-token-info 'EOF 0)
 
-(define-token-info 'PLUS 10 nud-prefix-minus led-add)
-(define-token-info 'ASTERISK 20 #f led-mul)
+(define-token-info 'PLUS 10 #f led/+)
+(define-token-info 'MINUS 10 nud/- led/-)
+(define-token-info 'ASTERISK 20 #f led/*)
+(define-token-info 'SLASH 20 #f led//)
+(define-token-info 'CARET 30 #f led/^)
 
 ;; Port -> (Listof Token)
 ;; interp: Lexer; produces token by reading the input port
 (define (pratt/lex in)
   (let loop ([token (pratt/lexer in)]
              [result empty])
-    (begin (println token)
-           (if (equal? 'EOF token)
-               (reverse (cons token result))
-               (loop (pratt/lexer in)
-                     (cons token result))))))
+    (if (equal? 'EOF token)
+        (reverse (cons token result))
+        (loop (pratt/lexer in)
+              (cons token result)))))
 
 ;; String -> integer
 ;; interp: Entrypoint; Parses (and interprets) the given arithmetic expr
