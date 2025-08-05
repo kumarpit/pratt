@@ -99,9 +99,12 @@
 (define (parse-expression cursor [rbp 0])
   (let* ([current-token (token-type (peek cursor))]
          [token-info (hash-ref token-type->token-info current-token)]
-         [left ((TokenInfo-nud token-info) (begin
-                                             (consume! cursor)
-                                             cursor))])
+         [nud (TokenInfo-nud token-info)]
+         [left (begin
+                 (unless nud (error "Unexpected token" current-token))
+                 (nud (begin
+                        (consume! cursor)
+                        cursor)))])
     (let loop ([left left])
       (define next-token (peek cursor))
       (define next-token-info (hash-ref token-type->token-info next-token))
