@@ -2,6 +2,8 @@
 (require parser-tools/lex
          (prefix-in : parser-tools/lex-sre))
 
+;; Simple arithmetic expression language to explore Pratt parsing
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; LEXER
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -20,8 +22,7 @@
 
 (define-empty-tokens
   token/operator
-  (ASSIGN
-   PLUS
+  (PLUS
    MINUS
    ASTERISK
    SLASH
@@ -31,8 +32,7 @@
 
 (define-tokens
   token/value
-  (NAME
-   NUMBER))
+  (NUMBER))
 
 (define pratt/lexer
   (lexer
@@ -41,7 +41,6 @@
    [")" (token-RIGHT_PAREN)]
    ["," (token-COMMA)]
    ;; Operators
-   ["=" (token-ASSIGN)]
    ["+" (token-PLUS)]
    ["-" (token-MINUS)]
    ["*" (token-ASTERISK)]
@@ -50,9 +49,9 @@
    ["?" (token-QUESTION)]
    [":" (token-COLON)]
    ;; Values
-   [(:: alphabetic (:* (:or alphabetic numeric)))
-    (token-NAME (string->symbol lexeme))]
-   [numeric (token-NUMBER (string->number lexeme))]
+   [(:: (:+ numeric)
+        (:? (:: "." (:+ numeric))))
+    (token-NUMBER (string->number lexeme))]
    ;; Misc
    [(union #\space #\newline #\tab #\return) (pratt/lexer input-port)]
    [(eof) (token-EOF)]))
@@ -84,8 +83,8 @@
 
 ;; TokenInfo is
 ;; (struct _ ([lbp : Natural]
-;; [nud (or (Cursor -> Integer) #f)]
-;; [led (or (Cursor -> Integer) #f)]))
+;;   [nud (or (Cursor -> Integer) #f)]
+;;   [led (or (Cursor -> Integer) #f)]))
 ;; interp: contains the left-binding power (lbp), null-denotation and
 ;; left-denotation handler for a Token
 ;;
@@ -102,7 +101,7 @@
          [nud (TokenInfo-nud token-info)]
          [left (begin
                  (unless nud (error 'unexpected-token
-                                    "Unexpected token ~a"
+                                    "~a"
                                     current-token))
                  (nud (begin
                         (consume! cursor)
@@ -112,7 +111,7 @@
       (define next-token-info (hash-ref token-type->token-info next-token #f))
       (begin
         (unless next-token-info (error 'unexpected-token
-                                       "Unexpected token ~a"
+                                       "~a"
                                        next-token))
         (if (and next-token-info (> (TokenInfo-lbp next-token-info) rbp))
             (begin
@@ -139,11 +138,7 @@
 ;; interp: if + appears in the infix position, it should add the
 ;; immediate left and right expressions
 (define (nud/left-paren cursor)
-  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
-                                        (- (Cursor-pos cursor) 1)))]
-         [info (hash-ref token-type->token-info op-type)]
-         [bp (TokenInfo-lbp info)]
-         [result (parse-expression cursor bp)])
+  (let ([result (parse-expression cursor 0)])
     (begin
       (unless (equal? (token-type (peek cursor)) 'RIGHT_PAREN)
         (error "Unmatched ("))
@@ -166,9 +161,8 @@
            [bp (TokenInfo-lbp info)])
       (op cursor left bp))))
 
-(define (led/question op-type)
-  (construct-led op-type
-                 (λ (cursor left _bp)
+(define led/question
+  (construct-led (λ (cursor left _bp)
                    (let ([next (parse-expression cursor 0)])
                      (if (zero? left)
                          next
@@ -177,6 +171,7 @@
                              (error "Malformed ternery"))
                            (consume! cursor)
                            (parse-expression cursor 0)))))))
+
 (define led/plus
   (construct-led (λ (cursor left bp)
                    (+ left (parse-expression cursor bp)))))
@@ -233,3 +228,155 @@
 (define (pratt/parse str)
   (let ([tokens (call-with-input-string str pratt/lex)])
     (parse-expression (Cursor tokens 0))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; TESTS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(module+ test
+  (require rackunit
+           rackunit/text-ui)
+  ;; Helper to run the lexer on a string for testing
+  (define (lex-string str)
+    (call-with-input-string str pratt/lex))
+
+  (define pratt-tests
+    (test-suite "Pratt Parser Tests"
+                (test-suite
+                 "Lexer"
+                 (test-case "Tokenizes numbers"
+                            (check-equal?
+                             (lex-string "123 45")
+                             (list (token-NUMBER 123)
+                                   (token-NUMBER 45)
+                                   (token-EOF))))
+
+                 (test-case "Tokenizes operators"
+                            (check-equal?
+                             (lex-string "+ - * / ^ ? :")
+                             (list (token-PLUS)
+                                   (token-MINUS)
+                                   (token-ASTERISK)
+                                   (token-SLASH)
+                                   (token-CARET)
+                                   (token-QUESTION)
+                                   (token-COLON)
+                                   (token-EOF))))
+
+                 (test-case "Tokenizes punctuation"
+                            (check-equal? (lex-string "( ) ,")
+                                          (list
+                                           (token-LEFT_PAREN)
+                                           (token-RIGHT_PAREN)
+                                           (token-COMMA)
+                                           (token-EOF))))
+
+                 (test-case "Ignores whitespace"
+                            (check-equal? (lex-string "  1 \n+\t2  ")
+                                          (list
+                                           (token-NUMBER 1)
+                                           (token-PLUS)
+                                           (token-NUMBER 2)
+                                           (token-EOF))))
+
+                 (test-case "Handles empty string"
+                            (check-equal?
+                             (lex-string "") (list (token-EOF))))
+
+                 (test-case "Complex expression tokenization"
+                            (check-equal? (lex-string "(5 + 1) * 2")
+                                          (list (token-LEFT_PAREN)
+                                                (token-NUMBER 5)
+                                                (token-PLUS)
+                                                (token-NUMBER 1)
+                                                (token-RIGHT_PAREN)
+                                                (token-ASTERISK)
+                                                (token-NUMBER 2)
+                                                (token-EOF)))))
+
+                (test-suite
+                 "Parser"
+                 (test-case "Parses a single number"
+                            (check-equal? (pratt/parse "123") 123))
+
+                 (test-case "Simple addition"
+                            (check-equal? (pratt/parse "5 + 8") 13))
+
+                 (test-case "Simple subtraction"
+                            (check-equal? (pratt/parse "10 - 4") 6))
+
+                 (test-case "Simple multiplication"
+                            (check-equal? (pratt/parse "3 * 7") 21))
+
+                 (test-case "Simple division"
+                            (check-equal? (pratt/parse "20 / 5") 4))
+
+                 (test-case "Honors operator precedence (PEMDAS)"
+                            (check-equal?
+                             (pratt/parse "2 + 3 * 4") 14)
+                            (check-equal?
+                             (pratt/parse "2 * 3 + 4") 10))
+
+                 (test-case "Honors parentheses"
+                            (check-equal?
+                             (pratt/parse "(2 + 3) * 4") 20))
+
+                 (test-case "Handles left-associativity for +-*/"
+                            (check-equal?
+                             (pratt/parse "10 - 5 - 2") 3)
+                            (check-equal?
+                             (pratt/parse "16 / 4 / 2") 2))
+
+                 (test-case
+                  "Handles right-associativity for exponentiation"
+                  (check-equal?
+                   ; 2^(3^2) = 2^9 = 512
+                   (pratt/parse "2 ^ 3 ^ 2") 512)
+                  (check-not-equal?
+                   ; (2^3)^2 = 8^2 = 64
+                   (pratt/parse "2 ^ 3 ^ 2") 64))
+
+                 (test-case "Handles unary minus (prefix)"
+                            (check-equal? (pratt/parse "-10") -10)
+                            (check-equal? (pratt/parse "5 + -2") 3)
+                            (check-equal?
+                             (pratt/parse "5 * -2") -10))
+
+                 (test-case "Handles complex nested expressions"
+                            (check-equal?
+                             (pratt/parse
+                              "- (2 + 3) * (10 / (2*2) + -1)")
+                             (-
+                              (* (+ 2 3)
+                                 (+ (/ 10 (* 2 2)) -1)))))
+
+                 (test-suite
+                  "Ternary operator"
+                  (test-case "Selects 'else' branch when condition is non-zero"
+                             (check-equal? (pratt/parse "1 ? 10 : 20") 20)
+                             (check-equal? (pratt/parse "-5 ? 10 : 20") 20))
+
+                  (test-case "Selects 'if' branch when condition is zero"
+                             (check-equal? (pratt/parse "0 ? 10 : 20") 10))
+
+                  (test-case "Ternary precedence is low"
+                             ;; (1+1) -> 2 -> 'else' branch -> 20
+                             (check-equal? (pratt/parse "1 + 1 ? 10 : 20") 20)
+                             ;; (5*2) -> 10 -> 'else' branch -> (20+2) = 22
+                             (check-equal?
+                              (pratt/parse "5 * 2 ? 10 + 1 : 20 + 2") 22)))
+
+                 (test-suite
+                  "Error Handling"
+                  (test-case "Unmatched parenthesis"
+                             (check-exn (regexp "Unmatched \\(")
+                                        (λ () (pratt/parse "(1 + 2"))))
+
+                  (test-case "Unexpected token (dangling operator)"
+                             (check-exn (regexp "unexpected-token")
+                                        (λ () (pratt/parse "1 +"))))
+
+                  (test-case "Malformed ternary (note typo in original code)"
+                             (check-exn (regexp "Malformed ternery")
+                                        (λ () (pratt/parse "1 ? 2"))))))))
+  (run-tests pratt-tests))
