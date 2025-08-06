@@ -101,18 +101,24 @@
          [token-info (hash-ref token-type->token-info current-token)]
          [nud (TokenInfo-nud token-info)]
          [left (begin
-                 (unless nud (error "Unexpected token" current-token))
+                 (unless nud (error 'unexpected-token
+                                    "Unexpected token ~a"
+                                    current-token))
                  (nud (begin
                         (consume! cursor)
                         cursor)))])
     (let loop ([left left])
       (define next-token (peek cursor))
-      (define next-token-info (hash-ref token-type->token-info next-token))
-      (if (and next-token-info (> (TokenInfo-lbp next-token-info) rbp))
-          (begin
-            (consume! cursor)
-            (loop ((TokenInfo-led next-token-info) cursor left)))
-          left))))
+      (define next-token-info (hash-ref token-type->token-info next-token #f))
+      (begin
+        (unless next-token-info (error 'unexpected-token
+                                       "Unexpected token ~a"
+                                       next-token))
+        (if (and next-token-info (> (TokenInfo-lbp next-token-info) rbp))
+            (begin
+              (consume! cursor)
+              (loop ((TokenInfo-led next-token-info) cursor left)))
+            left)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; nud handlers
@@ -126,13 +132,13 @@
 ;; Cursor -> Integer
 ;; interp: if a minus token appears in a prefix position, it should negate
 ;; the following expression
-(define (nud/- cursor)
+(define (nud/minus cursor)
   (- (parse-expression cursor 100))) ;; Highest rbp
 
 ;; Cursor -> Integer
 ;; interp: if + appears in the infix position, it should add the
 ;; immediate left and right expressions
-(define (nud/lparen cursor)
+(define (nud/left-paren cursor)
   (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
                                         (- (Cursor-pos cursor) 1)))]
          [info (hash-ref token-type->token-info op-type)]
@@ -148,68 +154,49 @@
 ;; led handlers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define (led/? cursor left)
-  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
-                                        (- (Cursor-pos cursor) 1)))]
-         [info (hash-ref token-type->token-info op-type)]
-         [bp (TokenInfo-lbp info)]
-         [conseq (parse-expression cursor 0)])
-    (if (zero? left) conseq
-        (begin
-          (unless (equal? (token-type (peek cursor)) 'COLON)
-            (error "Malformed ternery"))
-          (consume! cursor)
-          (parse-expression cursor 0)))))
+;; (Integer Natural Cursor -> Integer) ->
+;; (Cursor Integer -> Integer)
+;; interp: Generic function to build led-handlers
+(define (construct-led op)
+  (λ (cursor left)
+    (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
+                                          (- (Cursor-pos cursor) 1)))]
+           [info (hash-ref token-type->token-info op-type #f)]
+           [_ (unless info (error "This should never happen"))]
+           [bp (TokenInfo-lbp info)])
+      (op cursor left bp))))
 
-;; LBP 10
+(define (led/question op-type)
+  (construct-led op-type
+                 (λ (cursor left _bp)
+                   (let ([next (parse-expression cursor 0)])
+                     (if (zero? left)
+                         next
+                         (begin
+                           (unless (equal? (token-type (peek cursor)) 'COLON)
+                             (error "Malformed ternery"))
+                           (consume! cursor)
+                           (parse-expression cursor 0)))))))
+(define led/plus
+  (construct-led (λ (cursor left bp)
+                   (+ left (parse-expression cursor bp)))))
 
-;; Cursor -> Integer
-;; interp: if + appears in the infix position, it should add the
-;; immediate left and right expressions
-(define (led/+ cursor left)
-  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
-                                        (- (Cursor-pos cursor) 1)))]
-         [info (hash-ref token-type->token-info op-type)]
-         [bp (TokenInfo-lbp info)])
-    (+ left (parse-expression cursor bp))))
+(define led/minus
+  (construct-led (λ (cursor left bp)
+                   (- left (parse-expression cursor bp)))))
 
-(define (led/- cursor left)
-  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
-                                        (- (Cursor-pos cursor) 1)))]
-         [info (hash-ref token-type->token-info op-type)]
-         [bp (TokenInfo-lbp info)])
-    (- left (parse-expression cursor bp))))
+(define led/mul
+  (construct-led (λ (cursor left bp)
+                   (* left (parse-expression cursor bp)))))
 
-;; LBP 20
+(define led/div
+  (construct-led (λ (cursor left bp)
+                   (/ left (parse-expression cursor bp)))))
 
-;; Cursor -> Integer
-;; interp: if * appears in the infix position, it should multiply the
-;; immediate left and right expressions
-(define (led/* cursor left)
-  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
-                                        (- (Cursor-pos cursor) 1)))]
-         [info (hash-ref token-type->token-info op-type)]
-         [bp (TokenInfo-lbp info)])
-    (* left (parse-expression cursor bp))))
-
-;; Cursor -> Integer
-;; interp: if * appears in the infix position, it should multiply the
-;; immediate left and right expressions
-(define (led// cursor left)
-  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
-                                        (- (Cursor-pos cursor) 1)))]
-         [info (hash-ref token-type->token-info op-type)]
-         [bp (TokenInfo-lbp info)])
-    (/ left (parse-expression cursor bp))))
-
-;; LBP 30
-
-(define (led/^ cursor left)
-  (let* ([op-type (token-type (list-ref (Cursor-tokens cursor)
-                                        (- (Cursor-pos cursor) 1)))]
-         [info (hash-ref token-type->token-info op-type)]
-         [bp (TokenInfo-lbp info)])
-    (expt left (parse-expression cursor (sub1 bp))))) ;; right-assoc
+(define led/expo
+  (construct-led (λ (cursor left bp)
+                   ;; We subtract 1 from the bp to achieve right associativity
+                   (expt left (parse-expression cursor (sub1 bp))))))
 
 ;; End of led handlers
 
@@ -219,17 +206,17 @@
   (hash-set! token-type->token-info type (TokenInfo lbp nud led)))
 
 (define-token-info 'NUMBER 0 nud/number)
-(define-token-info 'LEFT_PAREN 0 nud/lparen)
+(define-token-info 'LEFT_PAREN 0 nud/left-paren)
 (define-token-info 'RIGHT_PAREN 0)
 (define-token-info 'COLON 0)
 (define-token-info 'EOF 0)
 
-(define-token-info 'QUESTION 10 #f led/?)
-(define-token-info 'PLUS 10 #f led/+)
-(define-token-info 'MINUS 10 nud/- led/-)
-(define-token-info 'ASTERISK 20 #f led/*)
-(define-token-info 'SLASH 20 #f led//)
-(define-token-info 'CARET 30 #f led/^)
+(define-token-info 'QUESTION 10 #f led/question)
+(define-token-info 'PLUS 10 #f led/plus)
+(define-token-info 'MINUS 10 nud/minus led/minus)
+(define-token-info 'ASTERISK 20 #f led/mul)
+(define-token-info 'SLASH 20 #f led/div)
+(define-token-info 'CARET 30 #f led/expo)
 
 ;; Port -> (Listof Token)
 ;; interp: Lexer; produces token by reading the input port
