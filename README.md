@@ -2,6 +2,8 @@ Implementation of a Pratt parser for a simple arithmetic language (supports `+ *
 
 #### Examples
 ```racket
+1 + 2 * 3 ; = 7
+2 ^ 2 ^ 2 ; = 16
 -2 ^ 2 ^ 3 + 10 ; = 266
 (10 - 5 - 4) ? (2 * 5) : (0 ? 100 : 200) ; = 100
 -((1 + 1) ? 1 : 2 ^ 3) * 5 - (1 ? 10 : 20) ; = -45
